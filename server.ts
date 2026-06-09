@@ -4,10 +4,10 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initAIClient, analyzeScreenshot, TripDetails } from './utils/ai.ts';
-import { getDrivingDistance } from './utils/maps.ts';
-import { getFuelPriceForState } from './utils/fuel.ts';
-import { calculateFuelCost, buildFuelResponse } from './utils/calculator.ts';
+import { initAIClient, analyzeScreenshot, TripDetails } from './utils/ai';
+import { getDrivingDistance } from './utils/maps';
+import { getFuelPriceForState } from './utils/fuel';
+import { calculateFuelCost, buildFuelResponse } from './utils/calculator';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
