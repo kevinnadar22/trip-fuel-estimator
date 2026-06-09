@@ -12,11 +12,19 @@ const PLATFORMS = [
 export function AppHeader() {
   return (
     <Box sx={{ mb: 2 }}>
-      <Typography sx={{ fontWeight: 800, fontSize: '1.3rem', letterSpacing: '-0.02em', color: COLORS.text, lineHeight: 1.2, mb: 0.4 }}>
-        Ride Fuel Calculator
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1 }}>
+        <img src="/fairtriplogo.png" alt="FairTrip Logo" style={{ height: 38, width: 38, objectFit: 'contain', borderRadius: 8 }} />
+        <Box>
+          <Typography sx={{ fontWeight: 800, fontSize: '1.35rem', letterSpacing: '-0.02em', color: COLORS.text, lineHeight: 1.1 }}>
+            Fair Trip
+          </Typography>
+          <Typography sx={{ fontSize: '0.75rem', color: COLORS.textMuted, fontWeight: 500 }}>
+            Ride Fuel Calculator
+          </Typography>
+        </Box>
+      </Box>
       <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', lineHeight: 1.5 }}>
-        Upload your ride screenshot — get the real fuel cost.
+        Upload your ride screenshot - get the real fuel cost.
       </Typography>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 1.25, flexWrap: 'wrap' }}>
