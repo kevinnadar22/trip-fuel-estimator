@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react';
+import { ThemeProvider, CssBaseline } from '@mui/material';
 import {
-  ThemeProvider, CssBaseline,
   Box, Card, CardContent,
   Button, CircularProgress, Divider, Alert, Snackbar, Collapse, Typography,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment,
 } from '@mui/material';
 import { Fuel, ChevronDown, ChevronUp, MapPin, Compass } from 'lucide-react';
 
-import { theme } from './theme';
-import type { TripResult, HistoryEntry, VehicleSettings } from './types';
+import { theme, COLORS } from './theme';
 import { AppHeader } from './components/AppHeader';
 import { AppFooter } from './components/AppFooter';
 import { UploadZone } from './components/UploadZone';
@@ -17,150 +15,43 @@ import { ExampleScreenshot } from './components/ExampleScreenshot';
 import { VehicleDetailsAccordion } from './components/VehicleDetailsAccordion';
 import { ResultCard } from './components/ResultCard';
 import { HistorySection } from './components/HistorySection';
-
-const HISTORY_STORAGE_KEY = 'tripHistory';
-const MAX_HISTORY_SIZE = 5;
-
-function loadHistory(): HistoryEntry[] {
-  try {
-    const saved = localStorage.getItem(HISTORY_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(history: HistoryEntry[]) {
-  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
-}
-
-function buildHistoryEntry(data: TripResult, currency: string): HistoryEntry {
-  return {
-    id: Date.now().toString(),
-    startLocation: data.startLocation,
-    destination: data.destination,
-    distanceKm: data.distanceKm,
-    actualFuelCost: data.actualFuelCost,
-    currency: data.detectedCurrency || currency,
-    date: new Date().toLocaleDateString(),
-  };
-}
+import { ManualForm } from './components/ManualForm';
+import { useTripStore } from './store/useTripStore';
 
 export default function App() {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [vehicleSettings, setVehicleSettings] = useState<VehicleSettings>({
-    fuelEconomy: '',
-    economyUnit: 'km/l',
-    fuelPrice: '',
-    currency: '₹',
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<TripResult | null>(null);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [screenshotExpanded, setScreenshotExpanded] = useState(false);
-
-  const [missingLocationDialogOpen, setMissingLocationDialogOpen] = useState(false);
-  const [manualAddress, setManualAddress] = useState('');
-  const [manualDestAddress, setManualDestAddress] = useState('');
-  const [missingFields, setMissingFields] = useState<string[]>([]);
-  const [cachedDetails, setCachedDetails] = useState<any>(null);
-  const [isLocating, setIsLocating] = useState(false);
-  const [dialogError, setDialogError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setHistory(loadHistory());
-  }, []);
+  const {
+    activeTab,
+    previewUrl,
+    imageBase64,
+    vehicleSettings,
+    isLoading,
+    error,
+    result,
+    snackbarOpen,
+    history,
+    screenshotExpanded,
+    missingLocationDialogOpen,
+    manualAddress,
+    manualDestAddress,
+    missingFields,
+    isLocating,
+    dialogError,
+    setActiveTab,
+    setFile,
+    resetStore,
+    updateVehicleSettings,
+    calculateFuelCostFromScreenshot,
+    calculateFuelCostManually,
+    setSnackbarOpen,
+    setScreenshotExpanded,
+    setMissingLocationDialogOpen,
+    setManualAddress,
+    setManualDestAddress,
+    useCurrentLocationForDialog,
+  } = useTripStore();
 
   const handleFile = (file: File) => {
-    setPreviewUrl(URL.createObjectURL(file));
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageBase64(reader.result as string);
-      setResult(null);
-      setError(null);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleSubmit = async (manualStart?: string, manualDest?: string) => {
-    if (!imageBase64) return;
-    setIsLoading(true);
-    setError(null);
-    setDialogError(null);
-    try {
-      const response = await fetch('/api/calculate-fuel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64,
-          ...vehicleSettings,
-          manualStartLocation: manualStart,
-          manualDestination: manualDest,
-          cachedDetails: (manualStart || manualDest) ? cachedDetails : undefined,
-        }),
-      });
-      const data = await response.json();
-      
-      if (!response.ok) {
-        if (data.code === 'MISSING_LOCATION') {
-          setCachedDetails(data.details);
-          setMissingFields(data.missingFields);
-          if (data.details) {
-            setManualAddress(data.details.startLocation || '');
-            setManualDestAddress(data.details.destination || '');
-          }
-          setMissingLocationDialogOpen(true);
-          return;
-        }
-        throw new Error(data.error || 'Failed to calculate');
-      }
-
-      setResult(data);
-      setMissingLocationDialogOpen(false);
-      setManualAddress('');
-      setManualDestAddress('');
-
-      const newEntry = buildHistoryEntry(data, vehicleSettings.currency);
-      setHistory((prev) => {
-        const next = [newEntry, ...prev.filter((i) => i.id !== newEntry.id)].slice(0, MAX_HISTORY_SIZE);
-        saveHistory(next);
-        return next;
-      });
-    } catch (err: any) {
-      if (manualStart) {
-        setDialogError(err.message || 'An error occurred during calculation.');
-      } else {
-        setError(err.message || 'An unexpected error occurred');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setDialogError('Geolocation is not supported by your browser.');
-      return;
-    }
-    setIsLocating(true);
-    setDialogError(null);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        setManualAddress(`${lat},${lng}`);
-        setIsLocating(false);
-      },
-      (err) => {
-        console.error('Geolocation error:', err);
-        setDialogError('Could not retrieve current location. Please enter it manually.');
-        setIsLocating(false);
-      },
-      { timeout: 10000 }
-    );
+    setFile(file);
   };
 
   const handleShare = async () => {
@@ -173,22 +64,8 @@ export default function App() {
     } catch { /* clipboard unavailable */ }
   };
 
-  const handleReset = () => {
-    setPreviewUrl(null);
-    setResult(null);
-    setImageBase64(null);
-    setError(null);
-    setScreenshotExpanded(false);
-    setMissingLocationDialogOpen(false);
-    setManualAddress('');
-    setManualDestAddress('');
-    setCachedDetails(null);
-    setDialogError(null);
-    setMissingFields([]);
-  };
-
-  const updateSetting = <K extends keyof VehicleSettings>(key: K) =>
-    (value: VehicleSettings[K]) => setVehicleSettings((prev) => ({ ...prev, [key]: value }));
+  const updateSetting = (key: 'fuelEconomy' | 'economyUnit' | 'fuelPrice' | 'currency') =>
+    (value: string) => updateVehicleSettings(key, value);
 
   const hasUpload = !!previewUrl;
   const showActions = hasUpload && !result;
@@ -204,55 +81,127 @@ export default function App() {
               <AppHeader />
               <Divider sx={{ mb: 2 }} />
 
-              {!previewUrl ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <UploadZone onFile={handleFile} />
-                  <ExampleScreenshot />
-                </Box>
-              ) : result ? (
-                <Box sx={{ mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2.5, overflow: 'hidden' }}>
-                  <Button
-                    size="small"
-                    variant="text"
-                    fullWidth
-                    onClick={() => setScreenshotExpanded(!screenshotExpanded)}
-                    sx={{ justifyContent: 'space-between', color: 'text.primary', py: 1, px: 2, textTransform: 'none' }}
-                  >
-                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                      {screenshotExpanded ? 'Hide ride screenshot' : 'Show ride screenshot'}
-                    </Typography>
-                    {screenshotExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </Button>
-                  <Collapse in={screenshotExpanded}>
-                    <Box sx={{ p: 1.5, pt: 0, borderTop: '1px solid', borderColor: 'divider' }}>
-                      <ScreenshotPreview url={previewUrl} onClear={handleReset} />
+              {result ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
+                  {previewUrl && (
+                    <Box sx={{ mb: 0.5, border: '1px solid', borderColor: 'divider', borderRadius: 2.5, overflow: 'hidden' }}>
+                      <Button
+                        size="small"
+                        variant="text"
+                        fullWidth
+                        onClick={() => setScreenshotExpanded(!screenshotExpanded)}
+                        sx={{ justifyContent: 'space-between', color: 'text.primary', py: 1, px: 2, textTransform: 'none' }}
+                      >
+                        <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                          {screenshotExpanded ? 'Hide ride screenshot' : 'Show ride screenshot'}
+                        </Typography>
+                        {screenshotExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </Button>
+                      <Collapse in={screenshotExpanded}>
+                        <Box sx={{ p: 1.5, pt: 0, borderTop: '1px solid', borderColor: 'divider' }}>
+                          <ScreenshotPreview url={previewUrl} onClear={resetStore} />
+                        </Box>
+                      </Collapse>
                     </Box>
-                  </Collapse>
+                  )}
+                  <ResultCard
+                    result={result}
+                    {...vehicleSettings}
+                    onShare={handleShare}
+                    onReset={resetStore}
+                  />
                 </Box>
               ) : (
-                <Box sx={{ mb: 2 }}>
-                  <ScreenshotPreview url={previewUrl} onClear={handleReset} />
-                </Box>
-              )}
+                <Box>
+                  {/* Segmented Pill Tabs */}
+                  <Box sx={{
+                    display: 'flex',
+                    bgcolor: '#F5F4F1',
+                    borderRadius: 2.25,
+                    p: '4px',
+                    border: `1px solid ${COLORS.border}`,
+                    mb: 2.5,
+                    gap: 0.5
+                  }}>
+                    <Button
+                      fullWidth
+                      onClick={() => setActiveTab('screenshot')}
+                      sx={{
+                        borderRadius: 1.75,
+                        py: 0.85,
+                        fontSize: '0.8rem',
+                        color: activeTab === 'screenshot' ? COLORS.text : COLORS.textMuted,
+                        bgcolor: activeTab === 'screenshot' ? '#fff' : 'transparent',
+                        boxShadow: activeTab === 'screenshot' ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                        '&:hover': {
+                          bgcolor: activeTab === 'screenshot' ? '#fff' : 'rgba(0,0,0,0.03)',
+                        },
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }}
+                    >
+                      Screenshot Upload
+                    </Button>
+                    <Button
+                      fullWidth
+                      onClick={() => setActiveTab('manual')}
+                      sx={{
+                        borderRadius: 1.75,
+                        py: 0.85,
+                        fontSize: '0.8rem',
+                        color: activeTab === 'manual' ? COLORS.text : COLORS.textMuted,
+                        bgcolor: activeTab === 'manual' ? '#fff' : 'transparent',
+                        boxShadow: activeTab === 'manual' ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                        '&:hover': {
+                          bgcolor: activeTab === 'manual' ? '#fff' : 'rgba(0,0,0,0.03)',
+                        },
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }}
+                    >
+                      Manual Details
+                    </Button>
+                  </Box>
 
-              {showActions && (
-                <Box sx={{ mt: 1.75 }}>
-                  <VehicleDetailsAccordion
-                    {...vehicleSettings}
-                    setFuelEconomy={updateSetting('fuelEconomy')}
-                    setEconomyUnit={updateSetting('economyUnit')}
-                    setFuelPrice={updateSetting('fuelPrice')}
-                    setCurrency={updateSetting('currency')}
-                  />
-                  <Button
-                    variant="contained" fullWidth
-                    disabled={!imageBase64 || isLoading}
-                    onClick={() => handleSubmit()}
-                    startIcon={isLoading ? <CircularProgress size={15} color="inherit" /> : <Fuel size={15} />}
-                    sx={{ mt: 1.25, py: 1.15, fontSize: '0.87rem' }}
-                  >
-                    {isLoading ? 'Analyzing...' : 'Calculate Fuel Cost'}
-                  </Button>
+                  {/* Tab Panels */}
+                  {activeTab === 'screenshot' ? (
+                    <Box>
+                      {!previewUrl ? (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <UploadZone onFile={handleFile} />
+                          <ExampleScreenshot />
+                        </Box>
+                      ) : (
+                        <Box sx={{ mb: 2 }}>
+                          <ScreenshotPreview url={previewUrl} onClear={resetStore} />
+                        </Box>
+                      )}
+
+                      {showActions && (
+                        <Box sx={{ mt: 1.75 }}>
+                          <VehicleDetailsAccordion
+                            {...vehicleSettings}
+                            setFuelEconomy={updateSetting('fuelEconomy')}
+                            setEconomyUnit={updateSetting('economyUnit')}
+                            setFuelPrice={updateSetting('fuelPrice')}
+                            setCurrency={updateSetting('currency')}
+                          />
+                          <Button
+                            variant="contained" fullWidth
+                            disabled={!imageBase64 || isLoading}
+                            onClick={() => calculateFuelCostFromScreenshot()}
+                            startIcon={isLoading ? <CircularProgress size={15} color="inherit" /> : <Fuel size={15} />}
+                            sx={{ mt: 1.25, py: 1.15, fontSize: '0.87rem' }}
+                          >
+                            {isLoading ? 'Analyzing...' : 'Calculate Fuel Cost'}
+                          </Button>
+                        </Box>
+                      )}
+                    </Box>
+                  ) : (
+                    <ManualForm
+                      onSubmit={calculateFuelCostManually}
+                      isLoading={isLoading}
+                    />
+                  )}
                 </Box>
               )}
 
@@ -260,17 +209,6 @@ export default function App() {
                 <Alert severity="error" sx={{ mt: 1.75, borderRadius: 2, fontSize: '0.78rem', py: 0.5 }}>
                   {error}
                 </Alert>
-              )}
-
-              {result && (
-                <Box sx={{ mt: 1.75 }}>
-                  <ResultCard
-                    result={result}
-                    {...vehicleSettings}
-                    onShare={handleShare}
-                    onReset={handleReset}
-                  />
-                </Box>
               )}
 
               <HistorySection history={history} />
@@ -339,7 +277,7 @@ export default function App() {
               <Button
                 variant="outlined"
                 fullWidth
-                onClick={handleUseCurrentLocation}
+                onClick={useCurrentLocationForDialog}
                 disabled={isLoading || isLocating}
                 startIcon={isLocating ? <CircularProgress size={14} color="inherit" /> : <Compass size={14} />}
                 sx={{ py: 0.75, fontSize: '0.8rem', textTransform: 'none' }}
@@ -381,7 +319,7 @@ export default function App() {
           </Button>
           <Button
             variant="contained"
-            onClick={() => handleSubmit(manualAddress, manualDestAddress)}
+            onClick={() => calculateFuelCostFromScreenshot(manualAddress, manualDestAddress)}
             disabled={isLoading || (missingFields.includes('startLocation') && !manualAddress.trim()) || (missingFields.includes('destination') && !manualDestAddress.trim())}
             startIcon={isLoading && <CircularProgress size={14} color="inherit" />}
             sx={{ textTransform: 'none' }}

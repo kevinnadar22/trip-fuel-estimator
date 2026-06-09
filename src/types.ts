@@ -28,3 +28,13 @@ export interface VehicleSettings {
   fuelPrice: string;
   currency: string;
 }
+
+export interface ManualFields {
+  startLocation: string;
+  destination: string;
+  detectedState: string;
+  detectedPlatform: string;
+  detectedVehicle: string;
+  detectedFuelType: string;
+  detectedFare: string;
+}

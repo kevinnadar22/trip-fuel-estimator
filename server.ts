@@ -8,6 +8,9 @@ import { initAIClient, analyzeScreenshot, TripDetails } from './utils/ai.js';
 import { getDrivingDistance } from './utils/maps.js';
 import { getFuelPriceForState } from './utils/fuel.js';
 import { calculateFuelCost, buildFuelResponse } from './utils/calculator.js';
+import { saveTripCalculation } from './utils/db.js';
+import { INDIAN_STATES } from './utils/constants.js';
+import { getFriendlyErrorMessage, extractStateFromAddress, getEstimatedFuelEconomy } from './utils/helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,29 +29,7 @@ try {
   console.error("Failed to initialize OpenRouter client", e);
 }
 
-function getFriendlyErrorMessage(error: any): string {
-  const msg = error?.message || '';
-  if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
-    return 'OpenRouter/Gemini API quota exceeded. Please wait a few minutes and try again.';
-  }
-  return msg || 'Failed to process image.';
-}
-
-const INDIAN_STATES = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 
-  'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 
-  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 
-  'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 
-  'Uttarakhand', 'West Bengal', 'Delhi', 'Puducherry', 'Chandigarh', 'Ladakh', 'Jammu and Kashmir'
-];
-
-function extractStateFromAddress(address: string): string | null {
-  const clean = address.toLowerCase();
-  for (const state of INDIAN_STATES) {
-    if (clean.includes(state.toLowerCase())) return state;
-  }
-  return null;
-}
+// Utility functions and constants are imported from ./utils/helpers.js and ./utils/constants.js
 
 function isMissingLocation(loc?: string | null): boolean {
   if (!loc) return true;
@@ -108,12 +89,53 @@ async function resolveFuelPrice(detectedState: string | null, fuelType: string):
 }
 
 app.post('/api/calculate-fuel', async (req, res) => {
-  const { imageBase64, fuelEconomy, fuelPrice, economyUnit, manualStartLocation, manualDestination, cachedDetails } = req.body;
-  if (!imageBase64 || !economyUnit) return res.status(400).json({ error: 'Missing required parameters.' });
+  const {
+    imageBase64,
+    fuelEconomy,
+    fuelPrice,
+    economyUnit,
+    manualStartLocation,
+    manualDestination,
+    cachedDetails,
+    detectedState,
+    detectedPlatform,
+    detectedVehicle,
+    detectedFuelType,
+    detectedFare,
+  } = req.body;
+
+  if (!economyUnit) {
+    return res.status(400).json({ error: 'Missing economy unit.' });
+  }
+
+  if (!imageBase64 && (!manualStartLocation || !manualDestination)) {
+    return res.status(400).json({ error: 'Either screenshot or manual locations are required.' });
+  }
 
   try {
-    const details = await resolveTripDetails(imageBase64, manualStartLocation, manualDestination, cachedDetails);
-    if ('code' in details) return res.status(400).json(details);
+    let details: TripDetails;
+    if (imageBase64) {
+      const resolved = await resolveTripDetails(imageBase64, manualStartLocation, manualDestination, cachedDetails);
+      if ('code' in resolved) return res.status(400).json(resolved);
+      details = resolved;
+    } else {
+      const state = detectedState || extractStateFromAddress(manualStartLocation) || extractStateFromAddress(manualDestination);
+      if (!state) {
+        return res.status(400).json({ error: 'Could not resolve the Indian state for fuel pricing.' });
+      }
+      details = {
+        startLocation: manualStartLocation,
+        destination: manualDestination,
+        detectedState: state,
+        detectedPlatform: detectedPlatform || 'Manual',
+        detectedVehicle: detectedVehicle || 'Hatchback',
+        detectedFuelType: (detectedFuelType || 'petrol') as 'petrol' | 'diesel' | 'cng',
+        detectedFare: detectedFare ? parseFloat(detectedFare) : null,
+        detectedCurrency: '₹',
+        confidence: 'high',
+        estimatedFuelEconomy: getEstimatedFuelEconomy(detectedVehicle || 'Hatchback', detectedFuelType || 'petrol'),
+      };
+    }
 
     if (!details.detectedState) {
       return res.status(400).json({ error: 'Only trips within India are supported.' });
@@ -139,7 +161,29 @@ app.post('/api/calculate-fuel', async (req, res) => {
       estimatedPrice: finalFuelPrice,
     });
 
-    return res.json(buildFuelResponse({ details, distanceKm, actualFuelCost, finalFuelPrice }));
+    const responseData = buildFuelResponse({ details, distanceKm, actualFuelCost, finalFuelPrice });
+
+    try {
+      if (process.env.MONGODB_URI) {
+        await saveTripCalculation({
+          startLocation: responseData.startLocation,
+          destination: responseData.destination,
+          distanceKm: responseData.distanceKm,
+          estimatedFuelEconomy: responseData.estimatedFuelEconomy,
+          estimatedFuelPrice: responseData.estimatedFuelPrice,
+          detectedCurrency: responseData.detectedCurrency,
+          detectedVehicle: responseData.detectedVehicle,
+          detectedFuelType: responseData.detectedFuelType,
+          detectedPlatform: responseData.detectedPlatform,
+          detectedFare: responseData.detectedFare,
+          actualFuelCost: responseData.actualFuelCost,
+        });
+      }
+    } catch (dbErr) {
+      console.error('Failed to save trip to MongoDB:', dbErr);
+    }
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('API Error:', error);
     return res.status(500).json({ error: getFriendlyErrorMessage(error) });

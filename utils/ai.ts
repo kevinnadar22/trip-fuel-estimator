@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { TripDetails } from '../types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,19 +27,6 @@ export function initAIClient(apiKey?: string) {
 
 export function getAIClient(): OpenAI | null {
   return aiClient;
-}
-
-export interface TripDetails {
-  startLocation: string | null;
-  destination: string | null;
-  estimatedFuelEconomy: number;
-  detectedCurrency: string;
-  detectedVehicle: string;
-  detectedFuelType: 'petrol' | 'diesel' | 'cng';
-  detectedPlatform: string;
-  detectedState: string | null;
-  detectedFare: number | null;
-  confidence: 'high' | 'low';
 }
 
 export async function analyzeScreenshot(imageBase64: string): Promise<TripDetails> {

@@ -119,7 +119,20 @@ export function ResultCard({ result, fuelEconomy, fuelPrice, economyUnit, curren
 
       <Button
         size="small" variant="outlined" fullWidth onClick={onReset}
-        sx={{ mt: 1.5, borderColor: COLORS.border, color: COLORS.textMuted, fontSize: '1rem', py: 0.75, '&:hover': { borderColor: COLORS.accent, color: COLORS.accent } }}
+        sx={{
+          mt: 2,
+          borderColor: COLORS.accent,
+          color: COLORS.accentDark,
+          fontSize: '0.875rem',
+          py: 0.9,
+          borderRadius: 2,
+          '&:hover': {
+            borderColor: COLORS.accentDark,
+            bgcolor: `${COLORS.accentLight}30`,
+            color: COLORS.accentDark,
+          },
+          transition: 'all 0.15s ease-in-out',
+        }}
       >
         Calculate Another
       </Button>
