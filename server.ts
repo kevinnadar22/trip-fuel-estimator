@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initAIClient, analyzeScreenshot } from './utils/ai.ts';
+import { initAIClient, analyzeScreenshot, TripDetails } from './utils/ai.ts';
 import { getDrivingDistance } from './utils/maps.ts';
 import { getFuelPriceForState } from './utils/fuel.ts';
 import { calculateFuelCost, buildFuelResponse } from './utils/calculator.ts';

@@ -294,8 +294,10 @@ export default function App() {
         onClose={() => !isLoading && setMissingLocationDialogOpen(false)}
         maxWidth="xs"
         fullWidth
-        PaperProps={{
-          sx: { borderRadius: 3, p: 1 }
+        slotProps={{
+          paper: {
+            sx: { borderRadius: 3, p: 1 }
+          }
         }}
       >
         <DialogTitle sx={{ pb: 1, fontWeight: 700, fontSize: '1.1rem' }}>
@@ -323,12 +325,14 @@ export default function App() {
                 value={manualAddress}
                 onChange={(e) => setManualAddress(e.target.value)}
                 disabled={isLoading || isLocating}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
-                    </InputAdornment>
-                  ),
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
+                      </InputAdornment>
+                    ),
+                  }
                 }}
                 sx={{ mb: 1 }}
               />
@@ -354,12 +358,14 @@ export default function App() {
               value={manualDestAddress}
               onChange={(e) => setManualDestAddress(e.target.value)}
               disabled={isLoading}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
-                  </InputAdornment>
-                ),
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
+                    </InputAdornment>
+                  ),
+                }
               }}
               sx={{ mb: 2 }}
             />
