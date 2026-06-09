@@ -40,14 +40,15 @@ cd trip-fuel-estimator
 npm install
 ```
 
-### Step 3 — Add your Gemini API key
+### Step 3 — Add your API keys
 
-Create a file called `.env.local` in the project folder and add:
-```
-GEMINI_API_KEY=your_api_key_here
+Create a file called `.env` in the project folder and add:
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 ```
 
-> 💡 Get a free API key at [aistudio.google.com](https://aistudio.google.com/apikey)
+> 💡 Get an OpenRouter API key at [openrouter.ai](https://openrouter.ai/) and a Google Maps API key via [Google Cloud Console](https://console.cloud.google.com/).
 
 ### Step 4 — Start the app
 ```bash
