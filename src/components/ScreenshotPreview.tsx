@@ -57,8 +57,10 @@ export function ScreenshotPreview({ url, onClear }: ScreenshotPreviewProps) {
         open={open} 
         onClose={() => setOpen(false)} 
         maxWidth="md"
-        PaperProps={{
-          sx: { bgcolor: 'transparent', boxShadow: 'none', overflow: 'hidden', m: 2 }
+        slotProps={{
+          paper: {
+            sx: { bgcolor: 'transparent', boxShadow: 'none', overflow: 'hidden', m: 2 }
+          }
         }}
       >
         <DialogContent sx={{ p: 0, position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>

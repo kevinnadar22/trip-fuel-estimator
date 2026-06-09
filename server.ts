@@ -147,6 +147,10 @@ app.post('/api/calculate-fuel', async (req, res) => {
 });
 
 async function startServer() {
+  if (process.env.VERCEL) {
+    return;
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -167,3 +171,5 @@ async function startServer() {
 }
 
 startServer();
+
+export default app;
