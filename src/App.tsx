@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import {
   ThemeProvider, CssBaseline,
   Box, Card, CardContent,
-  Button, CircularProgress, Divider, Alert, Snackbar,
+  Button, CircularProgress, Divider, Alert, Snackbar, Collapse, Typography,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment,
 } from '@mui/material';
-import { Fuel } from 'lucide-react';
+import { Fuel, ChevronDown, ChevronUp, MapPin, Compass } from 'lucide-react';
 
 import { theme } from './theme';
 import type { TripResult, HistoryEntry, VehicleSettings } from './types';
@@ -59,6 +60,15 @@ export default function App() {
   const [result, setResult] = useState<TripResult | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [screenshotExpanded, setScreenshotExpanded] = useState(false);
+
+  const [missingLocationDialogOpen, setMissingLocationDialogOpen] = useState(false);
+  const [manualAddress, setManualAddress] = useState('');
+  const [manualDestAddress, setManualDestAddress] = useState('');
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [cachedDetails, setCachedDetails] = useState<any>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   useEffect(() => {
     setHistory(loadHistory());
@@ -75,19 +85,43 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (manualStart?: string, manualDest?: string) => {
     if (!imageBase64) return;
     setIsLoading(true);
     setError(null);
+    setDialogError(null);
     try {
       const response = await fetch('/api/calculate-fuel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64, ...vehicleSettings }),
+        body: JSON.stringify({
+          imageBase64,
+          ...vehicleSettings,
+          manualStartLocation: manualStart,
+          manualDestination: manualDest,
+          cachedDetails: (manualStart || manualDest) ? cachedDetails : undefined,
+        }),
       });
-      const data: TripResult = await response.json();
-      if (!response.ok) throw new Error((data as any).error || 'Failed to calculate');
+      const data = await response.json();
+      
+      if (!response.ok) {
+        if (data.code === 'MISSING_LOCATION') {
+          setCachedDetails(data.details);
+          setMissingFields(data.missingFields);
+          if (data.details) {
+            setManualAddress(data.details.startLocation || '');
+            setManualDestAddress(data.details.destination || '');
+          }
+          setMissingLocationDialogOpen(true);
+          return;
+        }
+        throw new Error(data.error || 'Failed to calculate');
+      }
+
       setResult(data);
+      setMissingLocationDialogOpen(false);
+      setManualAddress('');
+      setManualDestAddress('');
 
       const newEntry = buildHistoryEntry(data, vehicleSettings.currency);
       setHistory((prev) => {
@@ -96,10 +130,37 @@ export default function App() {
         return next;
       });
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred');
+      if (manualStart) {
+        setDialogError(err.message || 'An error occurred during calculation.');
+      } else {
+        setError(err.message || 'An unexpected error occurred');
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setDialogError('Geolocation is not supported by your browser.');
+      return;
+    }
+    setIsLocating(true);
+    setDialogError(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setManualAddress(`${lat},${lng}`);
+        setIsLocating(false);
+      },
+      (err) => {
+        console.error('Geolocation error:', err);
+        setDialogError('Could not retrieve current location. Please enter it manually.');
+        setIsLocating(false);
+      },
+      { timeout: 10000 }
+    );
   };
 
   const handleShare = async () => {
@@ -117,6 +178,13 @@ export default function App() {
     setResult(null);
     setImageBase64(null);
     setError(null);
+    setScreenshotExpanded(false);
+    setMissingLocationDialogOpen(false);
+    setManualAddress('');
+    setManualDestAddress('');
+    setCachedDetails(null);
+    setDialogError(null);
+    setMissingFields([]);
   };
 
   const updateSetting = <K extends keyof VehicleSettings>(key: K) =>
@@ -141,8 +209,30 @@ export default function App() {
                   <UploadZone onFile={handleFile} />
                   <ExampleScreenshot />
                 </Box>
+              ) : result ? (
+                <Box sx={{ mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2.5, overflow: 'hidden' }}>
+                  <Button
+                    size="small"
+                    variant="text"
+                    fullWidth
+                    onClick={() => setScreenshotExpanded(!screenshotExpanded)}
+                    sx={{ justifyContent: 'space-between', color: 'text.primary', py: 1, px: 2, textTransform: 'none' }}
+                  >
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                      {screenshotExpanded ? 'Hide ride screenshot' : 'Show ride screenshot'}
+                    </Typography>
+                    {screenshotExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </Button>
+                  <Collapse in={screenshotExpanded}>
+                    <Box sx={{ p: 1.5, pt: 0, borderTop: '1px solid', borderColor: 'divider' }}>
+                      <ScreenshotPreview url={previewUrl} onClear={handleReset} />
+                    </Box>
+                  </Collapse>
+                </Box>
               ) : (
-                <ScreenshotPreview url={previewUrl} onClear={handleReset} />
+                <Box sx={{ mb: 2 }}>
+                  <ScreenshotPreview url={previewUrl} onClear={handleReset} />
+                </Box>
               )}
 
               {showActions && (
@@ -157,7 +247,7 @@ export default function App() {
                   <Button
                     variant="contained" fullWidth
                     disabled={!imageBase64 || isLoading}
-                    onClick={handleSubmit}
+                    onClick={() => handleSubmit()}
                     startIcon={isLoading ? <CircularProgress size={15} color="inherit" /> : <Fuel size={15} />}
                     sx={{ mt: 1.25, py: 1.15, fontSize: '0.87rem' }}
                   >
@@ -198,6 +288,102 @@ export default function App() {
         message="Summary copied to clipboard!"
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
+
+      <Dialog
+        open={missingLocationDialogOpen}
+        onClose={() => !isLoading && setMissingLocationDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3, p: 1 }
+        }}
+      >
+        <DialogTitle sx={{ pb: 1, fontWeight: 700, fontSize: '1.1rem' }}>
+          Locations Missing
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.4 }}>
+            We couldn't detect all the trip locations from the screenshot. Please enter the missing ones manually to calculate fuel cost.
+          </Typography>
+          
+          {dialogError && (
+            <Alert severity="error" sx={{ mb: 2, borderRadius: 2, fontSize: '0.78rem', py: 0.5 }}>
+              {dialogError}
+            </Alert>
+          )}
+
+          {missingFields.includes('startLocation') && (
+            <Box sx={{ mb: 2 }}>
+              <TextField
+                autoFocus
+                label="From / Starting Location"
+                placeholder="e.g. Tambaram, Chennai or Mumbai Airport"
+                fullWidth
+                size="small"
+                value={manualAddress}
+                onChange={(e) => setManualAddress(e.target.value)}
+                disabled={isLoading || isLocating}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ mb: 1 }}
+              />
+              <Button
+                variant="outlined"
+                fullWidth
+                onClick={handleUseCurrentLocation}
+                disabled={isLoading || isLocating}
+                startIcon={isLocating ? <CircularProgress size={14} color="inherit" /> : <Compass size={14} />}
+                sx={{ py: 0.75, fontSize: '0.8rem', textTransform: 'none' }}
+              >
+                {isLocating ? 'Locating...' : 'Use Current Location'}
+              </Button>
+            </Box>
+          )}
+
+          {missingFields.includes('destination') && (
+            <TextField
+              label="To / Destination"
+              placeholder="e.g. Bandra Railway Station, Mumbai"
+              fullWidth
+              size="small"
+              value={manualDestAddress}
+              onChange={(e) => setManualDestAddress(e.target.value)}
+              disabled={isLoading}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <MapPin size={16} style={{ color: 'rgba(0, 0, 0, 0.54)', marginRight: '4px' }} />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 2 }}
+            />
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2, pt: 1, gap: 1 }}>
+          <Button 
+            onClick={() => setMissingLocationDialogOpen(false)} 
+            disabled={isLoading}
+            sx={{ color: 'text.secondary', textTransform: 'none' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => handleSubmit(manualAddress, manualDestAddress)}
+            disabled={isLoading || (missingFields.includes('startLocation') && !manualAddress.trim()) || (missingFields.includes('destination') && !manualDestAddress.trim())}
+            startIcon={isLoading && <CircularProgress size={14} color="inherit" />}
+            sx={{ textTransform: 'none' }}
+          >
+            Confirm & Calculate
+          </Button>
+        </DialogActions>
+      </Dialog>
     </ThemeProvider>
   );
 }

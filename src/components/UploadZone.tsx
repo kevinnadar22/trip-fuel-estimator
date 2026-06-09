@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Box, Typography } from '@mui/material';
 import { UploadCloud } from 'lucide-react';
 import { COLORS } from '../theme';
@@ -7,8 +7,23 @@ interface UploadZoneProps {
   onFile: (file: File) => void;
 }
 
+function extractImageFromClipboard(e: ClipboardEvent): File | null {
+  const items = Array.from(e.clipboardData?.items ?? []);
+  const imageItem = items.find((item) => item.type.startsWith('image/'));
+  return imageItem ? imageItem.getAsFile() : null;
+}
+
 export function UploadZone({ onFile }: UploadZoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const file = extractImageFromClipboard(e);
+      if (file) onFile(file);
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [onFile]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -72,6 +87,25 @@ export function UploadZone({ onFile }: UploadZoneProps) {
         </Box>
         {'  ·  '}JPG, PNG, WEBP
       </Typography>
+
+      {/* Paste hint */}
+      <Box sx={{ mt: 1.25, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.6 }}>
+        <Box
+          component="kbd"
+          sx={{
+            fontSize: '0.62rem', fontFamily: 'inherit', fontWeight: 600,
+            px: 0.75, py: 0.25, borderRadius: 0.75,
+            bgcolor: COLORS.surface, border: `1px solid ${COLORS.border}`,
+            color: COLORS.textMuted, boxShadow: '0 1px 0 rgba(0,0,0,0.12)',
+            lineHeight: 1.5,
+          }}
+        >
+          Ctrl+V
+        </Box>
+        <Typography variant="caption" sx={{ color: COLORS.textMuted, fontSize: '0.68rem' }}>
+          to paste from clipboard
+        </Typography>
+      </Box>
     </Box>
   );
 }

@@ -6,6 +6,8 @@ export interface TripResult {
   detectedCurrency?: string;
   detectedPlatform?: string;
   detectedVehicle?: string;
+  detectedFuelType?: string;
+  detectedFare?: number;
   estimatedFuelEconomy?: number;
   estimatedFuelPrice?: number;
 }

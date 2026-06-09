@@ -1,8 +1,13 @@
+import 'dotenv/config';
 import express from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+import { initAIClient, analyzeScreenshot } from './utils/ai.ts';
+import { getDrivingDistance } from './utils/maps.ts';
+import { getFuelPriceForState } from './utils/fuel.ts';
+import { calculateFuelCost, buildFuelResponse } from './utils/calculator.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,118 +18,131 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Init Gemini
-let ai: GoogleGenAI | null = null;
 try {
-  if (process.env.GEMINI_API_KEY)  {
-    ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
+  initAIClient(apiKey);
+  console.log("OpenRouter client initialized successfully.");
 } catch (e) {
-  console.log("Failed to initialize Google Gen AI", e);
+  console.error("Failed to initialize OpenRouter client", e);
+}
+
+function getFriendlyErrorMessage(error: any): string {
+  const msg = error?.message || '';
+  if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+    return 'OpenRouter/Gemini API quota exceeded. Please wait a few minutes and try again.';
+  }
+  return msg || 'Failed to process image.';
+}
+
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 
+  'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 
+  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 
+  'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 
+  'Uttarakhand', 'West Bengal', 'Delhi', 'Puducherry', 'Chandigarh', 'Ladakh', 'Jammu and Kashmir'
+];
+
+function extractStateFromAddress(address: string): string | null {
+  const clean = address.toLowerCase();
+  for (const state of INDIAN_STATES) {
+    if (clean.includes(state.toLowerCase())) return state;
+  }
+  return null;
+}
+
+function isMissingLocation(loc?: string | null): boolean {
+  if (!loc) return true;
+  const clean = loc.toLowerCase().trim();
+  return clean === '' || clean.includes('unknown') || clean === 'null' || clean === 'none';
+}
+
+async function resolveTripDetails(
+  imageBase64: string,
+  manualStart?: string,
+  manualDest?: string,
+  cachedDetails?: any
+): Promise<TripDetails | { code: string; error: string; missingFields: string[]; details: TripDetails }> {
+  if (cachedDetails) {
+    const details = { ...cachedDetails };
+    if (manualStart) details.startLocation = manualStart;
+    if (manualDest) details.destination = manualDest;
+
+    if (!details.detectedState) {
+      if (details.startLocation) details.detectedState = extractStateFromAddress(details.startLocation);
+      if (!details.detectedState && details.destination) details.detectedState = extractStateFromAddress(details.destination);
+    }
+    return details;
+  }
+
+  const details = await analyzeScreenshot(imageBase64);
+  const missingFields: string[] = [];
+  if (isMissingLocation(details.startLocation)) missingFields.push('startLocation');
+  if (isMissingLocation(details.destination)) missingFields.push('destination');
+
+  if (missingFields.length > 0) {
+    return {
+      code: 'MISSING_LOCATION',
+      error: 'One or more locations could not be detected.',
+      missingFields,
+      details
+    };
+  }
+
+  if (!details.detectedState) {
+    if (details.startLocation) details.detectedState = extractStateFromAddress(details.startLocation);
+    if (!details.detectedState && details.destination) details.detectedState = extractStateFromAddress(details.destination);
+  }
+
+  return details;
+}
+
+async function resolveFuelPrice(detectedState: string | null, fuelType: string): Promise<number | null> {
+  if (!detectedState) return null;
+
+  const livePrices = await getFuelPriceForState(detectedState);
+  if (!livePrices) return null;
+
+  if (fuelType === 'diesel') return livePrices.diesel;
+  if (fuelType === 'cng') return livePrices.cng;
+  return livePrices.petrol;
 }
 
 app.post('/api/calculate-fuel', async (req, res) => {
-  if (!ai) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY is not set.' });
-  }
-
-  const { imageBase64, fuelEconomy, fuelPrice, economyUnit, currency } = req.body;
-
-  if (!imageBase64 || !economyUnit) {
-    return res.status(400).json({ error: 'Missing required parameters.' });
-  }
+  const { imageBase64, fuelEconomy, fuelPrice, economyUnit, manualStartLocation, manualDestination, cachedDetails } = req.body;
+  if (!imageBase64 || !economyUnit) return res.status(400).json({ error: 'Missing required parameters.' });
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents: {
-        parts: [
-          {
-            text: `You are an AI assistant determining the actual fuel cost from a ride-hailing app screenshot (Uber, Ola, Rapido, etc.).\n1. Extract the starting point and destination.\n2. Extract or estimate the driving distance in kilometers.\n3. Platform Detection: Detect which ride-hailing app the screenshot belongs to (e.g., 'Uber', 'Ola', 'Rapido', 'inDrive', 'Bolt').\n4. Vehicle Detection: Look for the EXACT car make/model mentioned. If only a ride tier is mentioned, identify it. If no vehicle is mentioned, estimate a generic vehicle class.\n5. Mileage: Use Google Search to find the highly accurate, real-world average fuel economy (mileage in km/l) for the specific car model detected. If only a ride tier is known or if no vehicle is mentioned, estimate the mileage for a typical car in that tier.\n6. Fuel Price: Infer the city/country from the map or currency and use Google Search to find the CURRENT actual fuel price per liter.\nReturn all the requested information in JSON format.`,
-          },
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: imageBase64.replace(/^data:image\/\w+;base64,/, ''),
-            },
-          }
-        ]
-      },
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            startLocation: { type: Type.STRING },
-            destination: { type: Type.STRING },
-            distanceKm: { type: Type.NUMBER },
-            estimatedFuelEconomy: { type: Type.NUMBER, description: "Estimated mileage in km/l" },
-            estimatedFuelPrice: { type: Type.NUMBER, description: "Estimated local fuel price per liter" },
-            detectedCurrency: { type: Type.STRING, description: "Currency symbol like ₹ or $" },
-            detectedVehicle: { type: Type.STRING, description: "Exact car model, ride tier, or generic class" },
-            detectedPlatform: { type: Type.STRING, description: "The ride hailing platform name, e.g., Uber, Ola, Rapido" },
-            confidence: { type: Type.STRING, description: "high or low" },
-          },
-          required: ['startLocation', 'destination', 'distanceKm', 'estimatedFuelEconomy', 'estimatedFuelPrice', 'detectedCurrency', 'detectedVehicle', 'detectedPlatform', 'confidence'],
-        },
-      },
-    });
+    const details = await resolveTripDetails(imageBase64, manualStartLocation, manualDestination, cachedDetails);
+    if ('code' in details) return res.status(400).json(details);
 
-    const resultStr = response.text;
-    if (!resultStr) {
-      throw new Error("No response text from Gemini");
+    if (!details.detectedState) {
+      return res.status(400).json({ error: 'Only trips within India are supported.' });
     }
 
-    const { startLocation, destination, distanceKm, confidence, estimatedFuelEconomy, estimatedFuelPrice, detectedCurrency, detectedVehicle, detectedPlatform } = JSON.parse(resultStr);
-    
-    // Calculate fuel cost based on unit
-    // economyUnit can be 'km/l' or 'mpg'
-    let distanceForCalculation = distanceKm;
-    if (economyUnit === 'mpg') {
-      distanceForCalculation = distanceKm * 0.621371;
+    const finalFuelPrice = await resolveFuelPrice(details.detectedState, details.detectedFuelType);
+    if (finalFuelPrice === null) {
+      return res.status(400).json({ error: `Could not retrieve live fuel price for ${details.detectedState}` });
     }
-    
-    // Use user-provided values or AI-estimated values
-    let finalFuelEconomy = parseFloat(fuelEconomy);
-    if (isNaN(finalFuelEconomy) || finalFuelEconomy <= 0) finalFuelEconomy = estimatedFuelEconomy || 15;
-    
-    let finalFuelPrice = parseFloat(fuelPrice);
-    if (isNaN(finalFuelPrice) || finalFuelPrice <= 0) finalFuelPrice = estimatedFuelPrice || 100;
 
-    // cost = (distance / economy) * price
-    const actualFuelCost = (distanceForCalculation / finalFuelEconomy) * finalFuelPrice;
+    let distanceKm = 0;
+    if (details.startLocation && details.destination) {
+      const googleDistance = await getDrivingDistance(details.startLocation, details.destination);
+      if (googleDistance !== null) distanceKm = googleDistance;
+    }
 
-    res.json({
-      startLocation: startLocation || 'Unknown Start',
-      destination: destination || 'Unknown Destination',
-      distanceKm: distanceKm || 0,
-      confidence: confidence || 'low',
-      estimatedFuelEconomy,
-      estimatedFuelPrice,
-      detectedCurrency,
-      detectedVehicle,
-      detectedPlatform,
-      actualFuelCost: isNaN(actualFuelCost) ? 0 : actualFuelCost,
+    const actualFuelCost = calculateFuelCost({
+      distanceKm,
+      fuelEconomyInput: fuelEconomy,
+      fuelPriceInput: fuelPrice,
+      economyUnit,
+      estimatedEconomy: details.estimatedFuelEconomy,
+      estimatedPrice: finalFuelPrice,
     });
+
+    return res.json(buildFuelResponse({ details, distanceKm, actualFuelCost, finalFuelPrice }));
   } catch (error: any) {
-    console.error('Gemini API Error:', error);
-    let errorMessage = 'Failed to process image.';
-    if (error && error.message) {
-      if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED') || error.message.includes('quota')) {
-        errorMessage = 'Gemini API quota exceeded. Please wait a few minutes and try again, or check your API key billing details.';
-      } else {
-        errorMessage = error.message;
-      }
-    }
-    res.status(500).json({ error: errorMessage });
+    console.error('API Error:', error);
+    return res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 

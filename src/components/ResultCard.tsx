@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, Stack, Divider, IconButton, Tooltip, Button } from '@mui/material';
+import { Box, Typography, Paper, Divider, IconButton, Tooltip, Button } from '@mui/material';
 import { MapPin, Navigation, Map, Fuel, DollarSign, Car, Share2 } from 'lucide-react';
 import { COLORS } from '../theme';
 import { getPlatformIcon } from '../utils/platformIcon';
@@ -10,29 +10,14 @@ interface ResultCardProps extends VehicleSettings {
   onReset: () => void;
 }
 
-function buildResultRows(result: TripResult, settings: VehicleSettings) {
-  const displayCurrency = result.detectedCurrency || settings.currency;
-  const rows = [
-    { icon: <MapPin size={15} />, label: 'From', value: result.startLocation },
-    { icon: <Navigation size={15} />, label: 'To', value: result.destination },
-    { icon: <Map size={15} />, label: 'Distance', value: `${result.distanceKm} km` },
-    {
-      icon: <Fuel size={15} />, label: 'Mileage',
-      value: `${settings.fuelEconomy || result.estimatedFuelEconomy} ${settings.economyUnit}`,
-      isAuto: !settings.fuelEconomy,
-    },
-    {
-      icon: <DollarSign size={15} />, label: 'Fuel price',
-      value: `${displayCurrency}${settings.fuelPrice || result.estimatedFuelPrice}`,
-      isAuto: !settings.fuelPrice,
-    },
-    ...(result.detectedVehicle ? [{ icon: <Car size={15} />, label: 'Vehicle', value: result.detectedVehicle }] : []),
-  ];
-  return { rows, displayCurrency };
-}
-
 export function ResultCard({ result, fuelEconomy, fuelPrice, economyUnit, currency, onShare, onReset }: ResultCardProps) {
-  const { rows, displayCurrency } = buildResultRows(result, { fuelEconomy, fuelPrice, economyUnit, currency });
+  const displayCurrency = result.detectedCurrency || currency;
+  const isCng = result.detectedFuelType === 'cng';
+  const priceUnit = isCng ? '/kg' : '/L';
+  
+  const fuelPercentage = result.detectedFare && result.actualFuelCost > 0
+    ? Math.round((result.actualFuelCost / result.detectedFare) * 100)
+    : null;
 
   return (
     <Paper elevation={0} sx={{ p: 2, bgcolor: COLORS.tagBg, border: `1px solid ${COLORS.border}`, borderRadius: 2.5 }}>
@@ -48,25 +33,88 @@ export function ResultCard({ result, fuelEconomy, fuelPrice, economyUnit, curren
         </Tooltip>
       </Box>
 
-      <Stack spacing={0.75} divider={<Divider />}>
-        {rows.map((row, i) => (
-          <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-            <Typography color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '1rem', minWidth: 100, flexShrink: 0, pt: '1px' }}>
-              {row.icon} {row.label}
-            </Typography>
-            <Box sx={{ flex: 1, textAlign: 'right' }}>
-              <Typography sx={{ fontWeight: 600, fontSize: '1rem', lineHeight: 1.4 }}>{row.value}</Typography>
-              {row.isAuto && <Typography sx={{ fontSize: '0.8rem', color: COLORS.textMuted }}>(auto)</Typography>}
-            </Box>
+      {/* Locations */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+          <MapPin size={15} style={{ color: COLORS.textMuted, marginTop: '3px', flexShrink: 0 }} />
+          <Box>
+            <Typography variant="caption" color="text.secondary">From</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{result.startLocation}</Typography>
           </Box>
-        ))}
-      </Stack>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+          <Navigation size={15} style={{ color: COLORS.textMuted, marginTop: '3px', flexShrink: 0 }} />
+          <Box>
+            <Typography variant="caption" color="text.secondary">To</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{result.destination}</Typography>
+          </Box>
+        </Box>
+      </Box>
 
-      <Box sx={{ mt: 1.5, pt: 1.5, borderTop: `2px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography sx={{ fontWeight: 700, fontSize: '1.1rem' }}>Actual Fuel Cost</Typography>
-        <Typography sx={{ fontWeight: 800, fontSize: '2.1rem', letterSpacing: '-0.03em', color: COLORS.accent }}>
-          {displayCurrency}{result.actualFuelCost.toFixed(2)}
-        </Typography>
+      <Divider />
+
+      {/* Grid of details */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1.5, mt: 1.5, mb: 1.5, p: 1.5, borderRadius: 2, bgcolor: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+        <Box>
+          <Typography color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', fontWeight: 500 }}>
+            <Map size={13} /> Distance
+          </Typography>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.9rem', mt: 0.25 }}>{result.distanceKm} km</Typography>
+        </Box>
+        <Box>
+          <Typography color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', fontWeight: 500 }}>
+            <Fuel size={13} /> Mileage
+          </Typography>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.9rem', mt: 0.25 }}>
+            {fuelEconomy || result.estimatedFuelEconomy} {economyUnit}
+          </Typography>
+        </Box>
+        <Box>
+          <Typography color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', fontWeight: 500 }}>
+            <DollarSign size={13} /> Fuel price
+          </Typography>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.9rem', mt: 0.25, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.25 }}>
+            {displayCurrency}{fuelPrice || result.estimatedFuelPrice}{priceUnit}
+            {!fuelPrice && result.detectedFuelType && (
+              <Typography component="span" sx={{ fontSize: '0.75rem', color: COLORS.textMuted }}>
+                ({result.detectedFuelType.charAt(0).toUpperCase() + result.detectedFuelType.slice(1)})
+              </Typography>
+            )}
+          </Typography>
+        </Box>
+        <Box sx={{ overflow: 'hidden' }}>
+          <Typography color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', fontWeight: 500 }}>
+            <Car size={13} /> Vehicle
+          </Typography>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.9rem', mt: 0.25, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            {result.detectedVehicle || 'Unknown'}
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Cost & Fare Comparison */}
+      <Box sx={{ mt: 1.5, pt: 1.5, borderTop: `2px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {result.detectedFare && (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography sx={{ fontWeight: 600, fontSize: '0.95rem', color: 'text.secondary' }}>Total Fare Paid</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: '1.25rem' }}>
+              {displayCurrency}{result.detectedFare.toFixed(2)}
+            </Typography>
+          </Box>
+        )}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography sx={{ fontWeight: 700, fontSize: '1.1rem' }}>Actual Fuel Cost</Typography>
+            {fuelPercentage !== null && (
+              <Typography sx={{ fontSize: '0.75rem', color: COLORS.textMuted, display: 'block' }}>
+                Fuel was ~{fuelPercentage}% of your total fare
+              </Typography>
+            )}
+          </Box>
+          <Typography sx={{ fontWeight: 800, fontSize: '2.1rem', letterSpacing: '-0.03em', color: COLORS.accent }}>
+            {displayCurrency}{result.actualFuelCost.toFixed(2)}
+          </Typography>
+        </Box>
       </Box>
 
       <Button
