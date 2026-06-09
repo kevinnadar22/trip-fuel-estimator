@@ -1,4 +1,4 @@
-import { TripDetails } from './ai';
+import { TripDetails } from './ai.js';
 
 export interface CalculationParams {
   distanceKm: number;
